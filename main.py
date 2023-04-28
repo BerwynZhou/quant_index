@@ -23,7 +23,7 @@ def main():
     logging.debug("计算数据完成...")
 
     result_df.to_csv(savename)
-    cal_data.sort_csv_by_rank_peTTM(savename)
+    # cal_data.sort_csv_by_rank(savename)
     
     logging.debug("数据计算完成，结果已保存到 %s", savename)
 

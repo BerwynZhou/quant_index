@@ -83,7 +83,11 @@ class DownloadTradeData:
 
         return df
 
-
+def concat_no_duplicate_columns(df1, df2):
+    common_columns = list(set(df1.columns) & set(df2.columns))
+    df2_unique_columns = list(set(df2.columns) - set(common_columns))
+    result_df = pd.concat([df1, df2[df2_unique_columns]], axis=1)
+    return result_df
 class CalData:
     def __init__(self, df, target_day, rolling_dic, rank_dic, max_num):
         self.df = df
@@ -108,30 +112,29 @@ class CalData:
         max_n2 = pd.DataFrame(unstack_data.rolling(N4).max().unstack())
         vol_n2 = pd.DataFrame(unstack_data.rolling(N5).std().unstack())
 
-        result = pd.concat([ma_n1, ma_n2, min_n2, max_n2, vol_n2], axis=1)
-        result.columns = [f'Ma{N1}_{col}', f'Ma{N2}_{col}', f'Min{N2}_{col}', f'Max{N2}_{col}', f'Vol{N2}_{col}']
-        result[f'Ma{N1}/Ma{N2}_{col}'] = result[f'Ma{N1}_{col}'] / result[f'Ma{N2}_{col}']
+        raw_columns = temp[['close', 'volume', 'turn', 'amount', 'peTTM']]
 
-        result = result.loc[(slice(None), dr[-N2:]), :].dropna()
+        new_columns = [f'Ma{N1}_{col}', f'Ma{N2}_{col}', f'Min{N2}_{col}', f'Max{N2}_{col}', f'Vol{N2}_{col}',
+                       f'Ma{N1}/Ma{N2}_{col}']
+        calculated_columns = [ma_n1, ma_n2, min_n2, max_n2, vol_n2, ma_n1 / ma_n2]
+
+        for idx, new_col in enumerate(new_columns):
+            raw_columns.insert(raw_columns.columns.get_loc(col) + idx + 1, new_col, calculated_columns[idx])
+
+        result = raw_columns.loc[(slice(None), dr[-N2:]), :].dropna()
         return result
-    
+
     def fun_rank(self, temp, col, ascending=True):
-        N = self.rank_dic[col]
-        unstack_data = temp[col].unstack().T
-        result = pd.DataFrame()
+        data = temp.copy()
 
-        for i in range(0, -N, -1):
-            if i != 0:
-                sub = unstack_data[-N + i:i]
-            else:
-                sub = unstack_data[-N:]
+        # 对每个指标使用 groupby 和 rank 方法进行排序
+        data['rank_close'] = data.groupby('code')['close'].rank(method='dense', ascending=False)
+        data['rank_turn'] = data.groupby('code')['turn'].rank(method='dense', ascending=False)
+        data['rank_amount'] = data.groupby('code')['amount'].rank(method='dense', ascending=False)
+        data['rank_volume'] = data.groupby('code')['volume'].rank(method='dense', ascending=False)
+        data['rank_peTTM'] = data.groupby('code')['peTTM'].rank(method='dense', ascending=True)
 
-            sub = sub.rank(axis=0, ascending=ascending, method='first')
-            result = pd.concat([result, sub.iloc[N - 1, :]], axis=1)
-
-        result = result.T.sort_index()
-        result = pd.DataFrame(result.unstack(), columns=['rank_' + col])
-        return result
+        return data
 
     def cal_data_fun(self):
         temp, dr = self.get_temp()
@@ -139,20 +142,19 @@ class CalData:
 
         for col in self.rolling_dic.keys():
             temp_rdf = self.fun_rolling(temp, dr, col)
-            rdf = pd.concat([rdf, temp_rdf], axis=1)
+            rdf = concat_no_duplicate_columns(rdf, temp_rdf)
 
-        for col in self.rank_dic.keys():
-            temp_rdf = self.fun_rank(temp, col, ascending=True)
-            rdf = pd.concat([rdf, temp_rdf], axis=1)
+        temp_rdf = self.fun_rank(rdf, col, ascending=True)
+        rdf = concat_no_duplicate_columns(rdf, temp_rdf)
 
         return rdf
     
-    def sort_csv_by_rank_peTTM(self,file_path):
-        # 读取 CSV 文件
-        df = pd.read_csv(file_path)
-        sorted_df = df.sort_values(
-        by=["rank_peTTM", "rank_amount", "rank_turn", "rank_volume", "rank_close"],
-        ascending=True)
+    # def sort_csv_by_rank(self,file_path):
+    #     # 读取 CSV 文件
+    #     df = pd.read_csv(file_path)
+    #     sorted_df = df.sort_values(
+    #     by=["rank_peTTM", "rank_amount", "rank_turn", "rank_volume", "rank_close"],
+    #     ascending=True)
 
         # 覆盖原文件
-        sorted_df.to_csv(file_path, index=False)
+        # sorted_df.to_csv(file_path, index=False)
